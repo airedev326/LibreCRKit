@@ -272,22 +272,25 @@ public final class SensorSession: NSObject, @unchecked Sendable {
     ///     notifications are now first-time enables, so no settle delay is used.
     public func refreshDataPlaneNotifications(
         characteristics: [CBUUID] = LibreSensorGATT.Char.dataPlaneNotifying,
-        forceReArm: Set<CBUUID> = [LibreSensorGATT.Char.patchControl],
+        forceReArm: Set<CBUUID> = Set(LibreSensorGATT.Char.dataPlaneNotifying),
         perCharacteristicTimeout: TimeInterval = 8,
         settleDelay: TimeInterval = 0.09
     ) async throws {
-        // Read-only data-plane characteristics aren't subscribed at connect
-        // (discoverAndSubscribe only enables the handshake set), so a single
-        // first-time CCCD enable is what kicks the sensor into streaming.
+        // Post-Phase-6 the sensor won't start broadcasting until each data-plane
+        // characteristic gets a fresh CCCD write. iOS retains the CCCD-on state
+        // across a reconnect to the same peripheral, so a plain setNotify(true)
+        // short-circuits (isNotifying already true) and never actually writes.
         //
-        // The command channel (patchControl) is different: across a reconnect to
-        // the same peripheral iOS retains its CCCD-on state, so a plain
-        // setNotify(true) short-circuits (isNotifying already true) and never
-        // writes the CCCD. The sensor's command channel is then left un-rearmed
-        // and rejects encrypted patchControl writes with "Unknown ATT error"
-        // (observed as 100% backfill-request failure). For `forceReArm` UUIDs do
-        // an explicit off→on so a real CCCD write reaches the sensor regardless of
-        // the cached state. Run all chars concurrently so acks overlap.
+        // First observed on the command channel (patchControl): un-rearmed
+        // encrypted writes returned "Unknown ATT error" → 100% backfill-request
+        // failure. Subsequent field logs also show extended runs with zero
+        // patchStatus notifications, matching the same silent-short-circuit
+        // pattern (Abbott's own app expects patchStatus ~1/min alongside
+        // glucoseData). So the default forceReArm now covers every UUID in
+        // dataPlaneNotifying — one extra CCCD round-trip per reconnect, but
+        // aligned with the vendor's post-Phase-6 toggle-all pattern captured
+        // in findings/IOS_LIVE_TAKEOVER_DEPLOY_2026_05_06.md. Run concurrently
+        // so acks overlap.
         _ = settleDelay
         let start = DispatchTime.now()
         BLETiming.log("refreshDataPlaneNotifications: \(characteristics.count) char(s), \(forceReArm.count) re-armed off→on")
@@ -356,6 +359,27 @@ public final class SensorSession: NSObject, @unchecked Sendable {
                 self.peripheral.readValue(for: chr)
             }
         }
+    }
+
+    /// Direct GATT read of the current `patchStatus` value.
+    ///
+    /// Vendor-parity fallback for `patchStatus`. Abbott's own app expects
+    /// `patchStatus` notifications approximately once per minute alongside
+    /// `glucoseData` and, when the notify channel goes quiet for ~60 s,
+    /// issues a direct read on this characteristic rather than waiting
+    /// further (see `findings/DATA_PLANE_LIFECYCLE_BACKFILL_2026_05_10.md`
+    /// and `findings/IOS_FIRSTPAIR_PHASE6_2026_05_10.md`). The response is
+    /// delivered through the standard notification stream — CoreBluetooth
+    /// uses the same delegate callback for reads and notifies — so callers
+    /// that already parse `notifications()` will see the read result there
+    /// like any other frame, no separate decode path required.
+    ///
+    /// Cheap and idempotent: the sensor tolerates the extra read, and it
+    /// converts a silent-subscription failure (CCCD short-circuit, iOS
+    /// notification loss) into a self-healing one on the channel that
+    /// carries lifecycle / error / terminal-failure signals.
+    public func readPatchStatus(timeout: TimeInterval = 5) async throws -> Data {
+        try await readRaw(LibreSensorGATT.Char.patchStatus, timeout: timeout)
     }
 
     private func removePendingRead(uuid: CBUUID, id: UUID) {
