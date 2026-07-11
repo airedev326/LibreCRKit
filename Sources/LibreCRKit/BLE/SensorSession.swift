@@ -29,6 +29,16 @@ public enum SensorSessionError: Error {
     case discoveryFailed(String)
 }
 
+/// Formats a CoreBluetooth error with its raw domain + ATT/CB code. The
+/// peripheral-returned "Unknown ATT error" string hides the code that tells
+/// us *why* a write was rejected: ATT 0x01/0x0e = invalid/stale handle (needs
+/// re-discovery), 0x05/0x0f = insufficient auth/encryption, 0x03 = write not
+/// permitted, 0x80+ = a vendor/state rejection. Surface it for field logs.
+func attErrorDescription(_ error: Error) -> String {
+    let ns = error as NSError
+    return "\(error.localizedDescription) [\(ns.domain) code=0x\(String(ns.code, radix: 16))]"
+}
+
 public final class SensorSession: NSObject, @unchecked Sendable {
     public let peripheral: CBPeripheral
     private let queue: DispatchQueue
@@ -623,7 +633,7 @@ extension SensorSession: CBPeripheralDelegate {
             let pending = conts.first!
             if let error = error {
                 _ = pending.box.resume(
-                    throwing: SensorSessionError.readFailed(characteristic.uuid, error.localizedDescription)
+                    throwing: SensorSessionError.readFailed(characteristic.uuid, attErrorDescription(error))
                 )
             } else if let value = characteristic.value {
                 _ = pending.box.resume(returning: value)
@@ -646,7 +656,7 @@ extension SensorSession: CBPeripheralDelegate {
             conts.first!.timeoutWorkItem?.cancel()
             if let error = error {
                 conts.first!.continuation.resume(
-                    throwing: SensorSessionError.writeFailed(characteristic.uuid, error.localizedDescription)
+                    throwing: SensorSessionError.writeFailed(characteristic.uuid, attErrorDescription(error))
                 )
             } else {
                 conts.first!.continuation.resume()
