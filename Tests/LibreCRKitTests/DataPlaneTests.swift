@@ -333,10 +333,13 @@ final class DataPlaneTests: XCTestCase {
         XCTAssertEqual(try status(errorWord: "0300").sensorAttention, .checkSensor)
         XCTAssertEqual(try status(errorWord: "0500").sensorAttention, .sensorEnded)
         XCTAssertEqual(try status(errorWord: "0600").sensorAttention, .sensorEnded)
-        XCTAssertEqual(try status(errorWord: "0700").sensorAttention, .replaceSensor)
+        XCTAssertEqual(try status(errorWord: "0700").sensorAttention, .checkSensor)
         XCTAssertEqual(try status(errorWord: "0800").sensorAttention, .replaceSensor)
         XCTAssertEqual(try status(errorWord: "0900").sensorAttention, .unknown(9))
-        XCTAssertTrue(try status(errorWord: "0700").shouldNotifyReplaceSensor)
+        // Code 7 is a transient transmission error: notifies the user (soft
+        // check-sensor) but is NOT a replace condition. Code 8 is the terminal replace.
+        XCTAssertFalse(try status(errorWord: "0700").shouldNotifyReplaceSensor)
+        XCTAssertTrue(try status(errorWord: "0700").shouldNotifyUser)
         XCTAssertTrue(try status(errorWord: "0800").shouldNotifyReplaceSensor)
         XCTAssertFalse(try status(errorWord: "0500").shouldNotifyReplaceSensor)
         XCTAssertTrue(try status(errorWord: "0300").shouldNotifyUser)
@@ -435,11 +438,21 @@ final class DataPlaneTests: XCTestCase {
         XCTAssertFalse(state.shouldNotifyUser)
         XCTAssertFalse(state.shouldNotifyReplaceSensor)
 
-        let replaceStatus = try PatchStatus(plaintext: raw("0c000700000000040c000000"))
+        // errorData 8 (terminated) is a genuine terminal replace. Code 7 is a
+        // transient transmission error and maps to checkSensor, not replace.
+        let replaceStatus = try PatchStatus(plaintext: raw("0c000800000000040c000000"))
         let replaceState = Libre3DataPlaneState(patchInfo: patchInfo, latestPatchStatus: replaceStatus)
         XCTAssertEqual(replaceState.latestSensorAttention, .replaceSensor)
         XCTAssertTrue(replaceState.shouldNotifyUser)
         XCTAssertTrue(replaceState.shouldNotifyReplaceSensor)
+
+        // errorData 7 is a transient transmission error: a soft check-sensor
+        // attention that notifies but is NOT a replace condition.
+        let transientStatus = try PatchStatus(plaintext: raw("0c000700000000040c000000"))
+        let transientState = Libre3DataPlaneState(patchInfo: patchInfo, latestPatchStatus: transientStatus)
+        XCTAssertEqual(transientState.latestSensorAttention, .checkSensor)
+        XCTAssertTrue(transientState.shouldNotifyUser)
+        XCTAssertFalse(transientState.shouldNotifyReplaceSensor)
     }
 
     func testSessionControlFrames() throws {

@@ -173,7 +173,8 @@ public enum PatchStatusError: Error, Equatable {
 /// This intentionally sits above `Libre3SensorError`: the app can present a
 /// replacement notification for conditions that are not simply the
 /// post-shutdown `.terminated` state. Current Abbott-app compatibility:
-/// `3 -> checkSensor`, `5/6 -> sensorEnded`, `7/8 -> replaceSensor`.
+/// `3 -> checkSensor`, `5/6 -> sensorEnded`, `7 -> checkSensor` (transient
+/// transmission error), `8 -> replaceSensor`.
 /// When `errorData == 0`, patch-state fallback treats state `3` as
 /// check-sensor, states `5`/`6` as sensor-ended, and states `7`/`8` as
 /// replace-sensor.
@@ -194,7 +195,15 @@ public enum Libre3SensorAttention: Equatable, Sendable, CustomStringConvertible 
         case 5, 6:
             self = .sensorEnded
             return
-        case 7, 8:
+        case 7:
+            // Code 7 is a transient transmission/comms error (see
+            // `Libre3SensorError.transmissionError`), not a terminal replace
+            // condition — the sensor keeps producing valid glucose. Surface it
+            // as a soft check-sensor attention rather than replaceSensor so
+            // clients don't latch the sensor inoperable on a recoverable fault.
+            self = .checkSensor
+            return
+        case 8:
             self = .replaceSensor
             return
         default:
