@@ -85,11 +85,22 @@ public struct SensorRestorationEvent: @unchecked Sendable {
     public let scanOptions: [String: String]
 }
 
+/// Scanner/connection errors.
+///
+/// **Classification note for clients:** when deciding whether a failure should
+/// count toward a *terminal / re-pair* escalation, classify per case, not per
+/// enum. None of these are credential failures:
+/// - `connectionFailed` and `timeout` are **transport** failures — retry them;
+///   they must not contribute to a re-pair threshold.
+/// - `bluetoothUnavailable` / `bluetoothPoweredOff` / `bluetoothUnauthorized`
+///   are **environment/permission** states, not sensor faults.
 public enum SensorScannerError: Error, CustomStringConvertible, LocalizedError {
     case bluetoothUnavailable
     case bluetoothPoweredOff
     case bluetoothUnauthorized
+    /// Transport: the link failed to establish. Retry.
     case connectionFailed(String)
+    /// Transport: the application-level connect deadline elapsed. Retry.
     case timeout(String)
 
     public var description: String {

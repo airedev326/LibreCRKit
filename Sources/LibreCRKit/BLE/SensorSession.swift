@@ -20,12 +20,30 @@ public struct SensorCharacteristicSnapshot: Sendable {
     public let isNotifying: Bool
 }
 
+/// Session (post-connect GATT) errors.
+///
+/// **Classification note for clients:** *every* case here is a **transport**
+/// failure — a GATT/link-level fault, not a credential problem. They are
+/// expected to occur on marginal links and should be retried (reconnect /
+/// re-arm), and must **not** contribute to a terminal / re-pair escalation.
+/// In particular, a `notifyFailed` on a data-plane CCCD (a timed-out
+/// notification-state write) is a routine transient, not a sign the sensor
+/// needs replacing.
 public enum SensorSessionError: Error {
+    /// Transport: an expected characteristic wasn't present after discovery
+    /// (often a stale handle — re-discover / reconnect).
     case missingCharacteristic(CBUUID)
+    /// Transport: enabling/disabling notifications (CCCD write) failed or timed
+    /// out. The `Bool` is the desired notify state; the `String` is detail.
     case notifyFailed(CBUUID, Bool, String)
+    /// Transport: a GATT read failed.
     case readFailed(CBUUID, String)
+    /// Transport: a GATT write failed. (Inspect the ATT code for auth/encryption
+    /// rejections, but treat the failure itself as transport — retry.)
     case writeFailed(CBUUID, String)
+    /// Transport: the link dropped.
     case disconnected(String?)
+    /// Transport: service/characteristic discovery failed.
     case discoveryFailed(String)
 }
 

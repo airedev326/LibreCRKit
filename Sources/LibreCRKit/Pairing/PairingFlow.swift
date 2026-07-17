@@ -108,6 +108,24 @@ public struct FirstPairDerivedHandshakeResult: Sendable {
     public let phase5Material: FirstPairPhase5KeyMaterial
 }
 
+/// Pairing/handshake errors.
+///
+/// **Classification note for clients:** living in the *pairing* enum does not
+/// make a case a *credential* failure. Classify per case before letting any of
+/// these contribute to a terminal / re-pair escalation:
+///
+/// - **Transport** (retry; do NOT escalate to re-pair): `writeTimeout` — a
+///   timed-out GATT write is a link fault, not a bad credential. Treat like the
+///   `SensorSessionError` cases.
+/// - **Genuinely credential-shaped** (may indicate re-pair, but use a *generous*
+///   threshold — a full-handshake fallback has repaired apparently
+///   credential-related failures on real hardware): `phase6VerificationFailed`,
+///   `phase5EphemeralPublicKeyMismatch`, `sensorCertificateVerificationFailed`.
+/// - **Configuration / programmer / data-shape** (a retry loop won't help):
+///   `sessionKeyDerivationNotImplemented`, `commandTransportRequired`,
+///   `phoneCertRequired`, `phase5MaterialUnavailable`, `randomFailed`,
+///   `sensorR1WrongSize` / `blePINWrongSize` / `tail4WrongSize`,
+///   `unexpectedCommandResponse`.
 public enum PairingFlowError: Error {
     case sessionKeyDerivationNotImplemented
     case commandTransportRequired
@@ -116,11 +134,17 @@ public enum PairingFlowError: Error {
     case sensorR1WrongSize(Int)
     case blePINWrongSize(Int)
     case tail4WrongSize(Int)
+    /// Credential-shaped: Phase 6 verification failed. Use a generous re-pair
+    /// threshold — a full-handshake fallback often recovers this.
     case phase6VerificationFailed(String)
     case phase5MaterialUnavailable
+    /// Credential-shaped: cached ephemeral public key mismatch.
     case phase5EphemeralPublicKeyMismatch(expected: Data, actual: Data)
     case randomFailed(OSStatus)
+    /// Transport: a GATT write timed out during the handshake. Retry — this is a
+    /// link fault, NOT a credential failure, despite living in this enum.
     case writeTimeout(label: String, seconds: TimeInterval)
+    /// Credential-shaped: the sensor certificate failed verification.
     case sensorCertificateVerificationFailed
 }
 
