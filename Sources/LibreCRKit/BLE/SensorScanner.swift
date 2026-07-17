@@ -252,9 +252,37 @@ public final class SensorScanner: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Background-safe connect with **no application-level timeout** — a named
+    /// alias for `connect(peripheral, timeout: 0)` so callers don't depend on a
+    /// magic zero. The underlying CoreBluetooth `connect` intent is left pending
+    /// indefinitely; iOS keeps it alive across app suspension and can wake/
+    /// relaunch the app when the peripheral becomes connectable. The client
+    /// stays responsible for cancelling the intent (see
+    /// `cancelPeripheralConnection(peripheralID:)`) once it no longer wants the
+    /// sensor. See ``connect(_:timeout:)`` for the full timeout semantics.
+    public func connectIndefinitely(_ peripheral: CBPeripheral) async throws -> SensorSession {
+        try await connect(peripheral, timeout: 0)
+    }
+
     /// Connects to `peripheral` and returns a fully-discovered `SensorSession`.
+    ///
     /// The Libre 3 often only accepts connections on roughly minute-spaced
     /// windows, so the default timeout is deliberately longer than one interval.
+    ///
+    /// - Parameter timeout: Application-level connect deadline, in seconds.
+    ///   A **positive** value schedules a client-side timeout: if the peripheral
+    ///   hasn't connected by then, the pending `central.connect` is cancelled and
+    ///   this throws `SensorScannerError.timeout`.
+    ///
+    ///   Pass **`0` (or any non-positive value) for an indefinite, background-safe
+    ///   connect**: no application-level timeout is scheduled and the CoreBluetooth
+    ///   `connect` request is left pending. Apple documents `connect` requests as
+    ///   never timing out on their own, so iOS keeps the intent alive across app
+    ///   suspension and can wake/relaunch the app when the peripheral becomes
+    ///   connectable. Prefer this in a background-maintained client: a finite
+    ///   timeout that fires while the app is suspended cancels the very thing that
+    ///   could have woken it, stranding the connection until the next foreground.
+    ///   ``connectIndefinitely(_:)`` is the named spelling of this mode.
     public func connect(_ peripheral: CBPeripheral, timeout: TimeInterval = 120) async throws -> SensorSession {
         let connectStart = Date()
         let alreadyConnected: Bool = await withCheckedContinuation { cont in
