@@ -51,6 +51,19 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
     /// Buffer them and replay to the first subscriber.
     private var pendingRestorationEvents: [SensorRestorationEvent] = []
 
+    /// Strong references to the peripherals we're actively using. Core
+    /// Bluetooth does NOT retain CBPeripheral objects for you -- a peripheral
+    /// with a pending connect (or one handed back by state restoration) is
+    /// deallocated once the last strong ref goes away, and iOS then silently
+    /// drops the pending connect / tears down the restored connection. That
+    /// manifested as a reconnect that never completes and, on a restored link,
+    /// a handshake failing with `missingCharacteristic` + "the specified
+    /// device has disconnected from us". We retain on requestConnect and on
+    /// willRestoreState, and release only on an intentional cancelConnection
+    /// (a plain didDisconnect keeps it -- we still want to reconnect).
+    /// Mutated only on centralQueue.
+    private var retainedPeripherals: [UUID: CBPeripheral] = [:]
+
     public init(configuration: SensorScannerConfiguration = .foreground) {
         self.configuration = configuration
         super.init()
@@ -126,6 +139,9 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
     public func requestConnect(_ peripheral: CBPeripheral) {
         centralQueue.async { [weak self] in
             guard let self else { return }
+            // Retain the peripheral for the lifetime of the connect intent --
+            // CB won't, and a deallocated peripheral drops the pending connect.
+            self.retainedPeripherals[peripheral.identifier] = peripheral
             // central.connect is idempotent; if the peripheral is
             // already connecting or connected, this is a no-op.
             self.central.connect(peripheral, options: self.configuration.connectOptions)
@@ -134,7 +150,10 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
 
     public func cancelConnection(_ peripheral: CBPeripheral) {
         centralQueue.async { [weak self] in
-            self?.central.cancelPeripheralConnection(peripheral)
+            guard let self else { return }
+            // Intentional teardown -- we no longer need to keep it alive.
+            self.retainedPeripherals[peripheral.identifier] = nil
+            self.central.cancelPeripheralConnection(peripheral)
         }
     }
 
@@ -238,6 +257,14 @@ extension SensorScannerNG: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         let peripherals = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral]) ?? []
+        // Retain the restored peripherals immediately (this delegate call is on
+        // centralQueue). iOS hands them back connected, but if we don't hold a
+        // strong ref they deallocate and the restored connection is torn down
+        // before the reconnect can use it. (Mirrors G7's handleDiscoveredPeripheral
+        // retaining each restored peripheral in managedPeripherals.)
+        for peripheral in peripherals {
+            retainedPeripherals[peripheral.identifier] = peripheral
+        }
         let scanServices = (dict[CBCentralManagerRestoredStateScanServicesKey] as? [CBUUID]) ?? []
         let scanOptions = (dict[CBCentralManagerRestoredStateScanOptionsKey] as? [String: Any]) ?? [:]
         let event = SensorRestorationEvent(
