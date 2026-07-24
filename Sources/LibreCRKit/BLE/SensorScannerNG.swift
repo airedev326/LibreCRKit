@@ -59,10 +59,22 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
     /// manifested as a reconnect that never completes and, on a restored link,
     /// a handshake failing with `missingCharacteristic` + "the specified
     /// device has disconnected from us". We retain on requestConnect and on
-    /// willRestoreState, and release only on an intentional cancelConnection
-    /// (a plain didDisconnect keeps it -- we still want to reconnect).
+    /// willRestoreState. We release only when an operation reaches a TERMINAL
+    /// state, never merely when the CoreBluetooth command was issued: an
+    /// intentional cancelConnection of a connected/disconnecting peripheral keeps
+    /// the ref until its didDisconnect/didFailToConnect lands (owning it through
+    /// the cancellation handoff), while cancelling a pending `.connecting` connect
+    /// releases immediately (iOS fires no terminal callback for that). A plain
+    /// unexpected didDisconnect keeps the ref -- it's still a reconnect candidate.
     /// Mutated only on centralQueue.
     private var retainedPeripherals: [UUID: CBPeripheral] = [:]
+
+    /// Peripherals for which we issued an intentional `cancelPeripheralConnection`
+    /// and are awaiting the terminal didDisconnect/didFailToConnect before dropping
+    /// the retained strong ref. Distinguishes an intentional cancel (release on the
+    /// terminal callback) from an unexpected disconnect (keep retaining). Mutated
+    /// only on centralQueue.
+    private var cancellingPeripherals: Set<UUID> = []
 
     public init(configuration: SensorScannerConfiguration = .foreground) {
         self.configuration = configuration
@@ -139,6 +151,9 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
     public func requestConnect(_ peripheral: CBPeripheral) {
         centralQueue.async { [weak self] in
             guard let self else { return }
+            // A fresh connect intent supersedes any pending cancellation handoff,
+            // so a superseded cancel's terminal callback won't drop this new ref.
+            self.cancellingPeripherals.remove(peripheral.identifier)
             // Retain the peripheral for the lifetime of the connect intent --
             // CB won't, and a deallocated peripheral drops the pending connect.
             self.retainedPeripherals[peripheral.identifier] = peripheral
@@ -151,9 +166,20 @@ public final class SensorScannerNG: NSObject, @unchecked Sendable {
     public func cancelConnection(_ peripheral: CBPeripheral) {
         centralQueue.async { [weak self] in
             guard let self else { return }
-            // Intentional teardown -- we no longer need to keep it alive.
-            self.retainedPeripherals[peripheral.identifier] = nil
+            let state = peripheral.state
             self.central.cancelPeripheralConnection(peripheral)
+            switch state {
+            case .connected, .disconnecting:
+                // A terminal didDisconnect/didFailToConnect is coming -- keep the
+                // strong ref (marked as an intentional cancel) until it lands, so we
+                // don't drop the handle while CB still has a callback outstanding.
+                self.cancellingPeripherals.insert(peripheral.identifier)
+            default:
+                // .connecting/.disconnected: cancelling a pending connect fires no
+                // terminal callback, so there's nothing to retain through.
+                self.cancellingPeripherals.remove(peripheral.identifier)
+                self.retainedPeripherals[peripheral.identifier] = nil
+            }
         }
     }
 
@@ -238,11 +264,23 @@ extension SensorScannerNG: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        releaseIfCancelling(peripheral)
         emit(.didFailToConnect(peripheral, error: error))
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        releaseIfCancelling(peripheral)
         emit(.didDisconnect(peripheral, error: error))
+    }
+
+    /// Terminal callback for a peripheral we intentionally cancelled: the
+    /// cancellation handoff is complete, so drop the retained strong ref now.
+    /// An unexpected disconnect (not marked cancelling) is left retained -- it's
+    /// still a reconnect candidate. Runs on centralQueue (a CB delegate callback).
+    private func releaseIfCancelling(_ peripheral: CBPeripheral) {
+        if cancellingPeripherals.remove(peripheral.identifier) != nil {
+            retainedPeripherals[peripheral.identifier] = nil
+        }
     }
 
     #if os(iOS)
