@@ -47,6 +47,28 @@ public enum SensorSessionError: Error {
     case discoveryFailed(String)
 }
 
+extension SensorSessionError: CustomStringConvertible {
+    /// Semantic description with associated values, so logs read
+    /// "disconnected — link dropped: …" instead of the opaque NSError-bridged
+    /// "SensorSessionError error 4" (the bare case ordinal).
+    public var description: String {
+        switch self {
+        case .missingCharacteristic(let uuid):
+            return "missingCharacteristic(\(uuid.uuidString)) — expected characteristic absent after discovery (stale handle; reconnect)"
+        case .notifyFailed(let uuid, let enabled, let detail):
+            return "notifyFailed(\(uuid.uuidString), enable=\(enabled)) — \(detail)"
+        case .readFailed(let uuid, let detail):
+            return "readFailed(\(uuid.uuidString)) — \(detail)"
+        case .writeFailed(let uuid, let detail):
+            return "writeFailed(\(uuid.uuidString)) — \(detail)"
+        case .disconnected(let detail):
+            return "disconnected — link dropped\(detail.map { ": \($0)" } ?? "")"
+        case .discoveryFailed(let detail):
+            return "discoveryFailed — \(detail)"
+        }
+    }
+}
+
 /// Formats a CoreBluetooth error with its raw domain + ATT/CB code. The
 /// peripheral-returned "Unknown ATT error" string hides the code that tells
 /// us *why* a write was rejected: ATT 0x01/0x0e = invalid/stale handle (needs
