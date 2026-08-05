@@ -28,7 +28,7 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
             lock.unlock()
 
             let session = NFCTagReaderSession(pollingOption: [.iso15693], delegate: self, queue: queue)
-            session?.alertMessage = "Hold iPhone near Libre 3 sensor."
+            session?.alertMessage = "Hold the TOP of your iPhone very close to the Sensor"
             self.session = session
             session?.begin()
         }
