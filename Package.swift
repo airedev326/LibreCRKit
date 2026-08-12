@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LibreCRKit",
+    defaultLocalization: "en",
     platforms: [
         .iOS(.v17),
         .macOS(.v14),
@@ -16,6 +17,7 @@ let package = Package(
             path: "Sources/LibreCRKit",
             resources: [
                 .copy("Resources/RuntimeTables"),
+                .process("Resources/Localizations"),
             ]
         ),
         .testTarget(

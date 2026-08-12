@@ -28,7 +28,10 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
             lock.unlock()
 
             let session = NFCTagReaderSession(pollingOption: [.iso15693], delegate: self, queue: queue)
-            session?.alertMessage = "Hold the TOP of your iPhone very close to the Sensor"
+            session?.alertMessage = LocalizedString(
+                "Hold the TOP of your iPhone very close to the Sensor",
+                comment: "NFC system sheet prompt while waiting for the sensor. TOP is capitalised deliberately: the antenna is at the iPhone's top edge, not its back."
+            )
             self.session = session
             session?.begin()
         }
@@ -45,7 +48,10 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
 
         switch result {
         case .success(let value):
-            session?.alertMessage = message ?? "Libre 3 NFC scan complete."
+            session?.alertMessage = message ?? LocalizedString(
+                "Libre 3 NFC scan complete.",
+                comment: "NFC system sheet, generic success when no more specific message applies"
+            )
             session?.invalidate()
             continuation?.resume(returning: value)
         case .failure(let error):
@@ -69,7 +75,13 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
 
             switch mode {
             case .readPatchInfo:
-                complete(.success(Libre3NFCScanResult(patchInfo: patchInfo)), message: "Libre 3 sensor read.")
+                complete(
+                    .success(Libre3NFCScanResult(patchInfo: patchInfo)),
+                    message: LocalizedString(
+                        "Libre 3 sensor read.",
+                        comment: "NFC system sheet, success after reading patch info without changing the sensor"
+                    )
+                )
 
             case .activateFreshSensor(let receiverID, let explicitTime):
                 guard patchInfo.recommendedCommandCode == .activate else {
@@ -81,7 +93,10 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
                     commandCode: .activate,
                     receiverID: receiverID,
                     explicitTime: explicitTime,
-                    message: "Libre 3 sensor activated."
+                    message: LocalizedString(
+                        "Libre 3 sensor activated.",
+                        comment: "NFC system sheet, success after activating a fresh sensor"
+                    )
                 )
 
             case .switchReceiver(let receiverID, let explicitTime):
@@ -94,7 +109,10 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
                     commandCode: .switchReceiver,
                     receiverID: receiverID,
                     explicitTime: explicitTime,
-                    message: "Libre 3 receiver switched."
+                    message: LocalizedString(
+                        "Libre 3 receiver switched.",
+                        comment: "NFC system sheet, success after binding an already-active sensor to this phone"
+                    )
                 )
 
             case .activateOrSwitchReceiver(let receiverID, let explicitTime):
@@ -105,7 +123,15 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
                     commandCode: commandCode,
                     receiverID: receiverID,
                     explicitTime: explicitTime,
-                    message: commandCode == .activate ? "Libre 3 sensor activated." : "Libre 3 receiver switched."
+                    message: commandCode == .activate
+                        ? LocalizedString(
+                            "Libre 3 sensor activated.",
+                            comment: "NFC system sheet, success after activating a fresh sensor"
+                        )
+                        : LocalizedString(
+                            "Libre 3 receiver switched.",
+                            comment: "NFC system sheet, success after binding an already-active sensor to this phone"
+                        )
                 )
 
             case .forceActivationCommand(let commandCode, let receiverID, let explicitTime):
@@ -115,7 +141,15 @@ public final class Libre3NFCActivationReader: NSObject, @unchecked Sendable {
                     commandCode: commandCode,
                     receiverID: receiverID,
                     explicitTime: explicitTime,
-                    message: commandCode == .activate ? "Libre 3 sensor activated." : "Libre 3 receiver switched."
+                    message: commandCode == .activate
+                        ? LocalizedString(
+                            "Libre 3 sensor activated.",
+                            comment: "NFC system sheet, success after activating a fresh sensor"
+                        )
+                        : LocalizedString(
+                            "Libre 3 receiver switched.",
+                            comment: "NFC system sheet, success after binding an already-active sensor to this phone"
+                        )
                 )
             }
         } catch {
@@ -198,7 +232,10 @@ extension Libre3NFCActivationReader: NFCTagReaderSessionDelegate {
 
     public func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
         guard tags.count == 1, let tag = tags.first else {
-            session.alertMessage = "More than one tag detected."
+            session.alertMessage = LocalizedString(
+                "More than one tag detected.",
+                comment: "NFC system sheet, several tags in range so the sensor is ambiguous. Polling restarts after this."
+            )
             session.restartPolling()
             complete(.failure(tags.isEmpty ? Libre3NFCError.noTag : Libre3NFCError.multipleTags))
             return
