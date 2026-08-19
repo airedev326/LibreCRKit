@@ -103,6 +103,9 @@ public enum SensorScannerError: Error, CustomStringConvertible, LocalizedError {
     /// Transport: the application-level connect deadline elapsed. Retry.
     case timeout(String)
 
+    /// Diagnostic text — always English, so logs and pairing transcripts stay
+    /// comparable across locales. User-visible text goes through
+    /// `errorDescription`.
     public var description: String {
         switch self {
         case .bluetoothUnavailable: return "Bluetooth unavailable"
@@ -113,7 +116,45 @@ public enum SensorScannerError: Error, CustomStringConvertible, LocalizedError {
         }
     }
 
-    public var errorDescription: String? { description }
+    /// Localized text for presentation, reached via `localizedDescription`. The
+    /// English values match `description` verbatim, so behaviour on an English
+    /// device is unchanged; `m` stays English because it carries internal
+    /// transport detail.
+    public var errorDescription: String? {
+        switch self {
+        case .bluetoothUnavailable:
+            return LocalizedString(
+                "Bluetooth unavailable",
+                comment: "Error shown when the device has no usable Bluetooth radio"
+            )
+        case .bluetoothPoweredOff:
+            return LocalizedString(
+                "Bluetooth powered off",
+                comment: "Error shown when Bluetooth is switched off; the user can fix this in Settings or Control Centre"
+            )
+        case .bluetoothUnauthorized:
+            return LocalizedString(
+                "Bluetooth permission denied",
+                comment: "Error shown when the app was denied Bluetooth permission"
+            )
+        case .connectionFailed(let m):
+            return String(
+                format: LocalizedString(
+                    "BLE connect failed: %@",
+                    comment: "Error shown when the BLE link failed to establish. %@ is English transport detail."
+                ),
+                m
+            )
+        case .timeout(let m):
+            return String(
+                format: LocalizedString(
+                    "BLE timeout: %@",
+                    comment: "Error shown when the BLE connect deadline elapsed. %@ is English transport detail."
+                ),
+                m
+            )
+        }
+    }
 }
 
 public final class SensorScanner: NSObject, @unchecked Sendable {
