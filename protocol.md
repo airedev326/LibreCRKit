@@ -31,6 +31,37 @@ The receiver ID is the protocol identity value used in the NFC activation or
 switch command. A LibreView account is not required by the protocol paths
 currently modeled by this package.
 
+An app that does mirror an Abbott app's account has to fold the LibreView
+Account ID the way that app does, because the sensor stores the receiver ID it
+was activated with and answers a later `0xA0`/`0xA8` carrying a different one
+with NFC error `0xB1`. Two folds are known, exposed as
+`Libre3ReceiverID.Derivation`:
+
+| Derivation | App | Fold over the lowercased account ID |
+| --- | --- | --- |
+| `freeStyleLibre3` | FreeStyle Libre 3 | `h = (h * 0x811c9dc5) ^ byte`, seeded 0 |
+| `libreByAbbott` | Libre by Abbott (US) | sum of consecutive 4-byte big-endian words, wrapped to 32 bits |
+
+The `libreByAbbott` fold was reverse-engineered and confirmed on live hardware
+on 2026-08-19: a US Libre 3 Plus (firmware 1.4.2.30) activated in that app,
+paired in Parallel mode, completed the full first-pair handshake through Phase 6
+and streamed. The `03 03` v1 certificate path covers these sensors unchanged.
+
+Because that fold sums four-byte words, permutations of complete four-byte
+chunks collide; byte order within a word still matters. This weak structure
+suggests the observed sum is an intermediate from a larger routine rather than
+the app's final value — it is nevertheless what the sensor accepts. Reading the
+words as signed rather than unsigned makes no difference, since the two
+interpretations differ by a multiple of 2^32 and the sum wraps to 32 bits.
+
+Sample vectors, using DiaBLE's documented sample account
+`2977dec2-492a-11ea-9702-0242ac110002` (not a real one):
+
+| Derivation | Value | On the wire |
+| --- | --- | --- |
+| `freeStyleLibre3` | `0x1f416d8d` | `8d6d411f` |
+| `libreByAbbott` | `0x8356f9c7` | `c7f95683` |
+
 ## NFC Layer
 
 Libre 3 sensors are scanned as ISO 15693 NFC tags.

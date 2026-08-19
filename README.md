@@ -88,6 +88,29 @@ If a user loses the original phone, a new install can accept the saved
 `receiverID` before scanning the active sensor. Active-sensor recovery then uses
 the switch-receiver NFC command and the normal BLE authorization flow.
 
+### Account-Derived Receiver IDs
+
+Abbott ships two phone apps that pair Libre 3 sensors, and both derive the
+receiver ID from the same LibreView Account ID but fold it differently. A sensor
+answers a later `0xA0`/`0xA8` carrying a receiver ID other than the one it was
+activated with using NFC error `0xB1`, so an app that mirrors an Abbott account
+must use the fold belonging to the app that activated the sensor:
+
+```swift
+let receiverID = Libre3ReceiverID(accountID: accountID, derivation: .libreByAbbott)
+```
+
+`.freeStyleLibre3` is the classic "FreeStyle Libre 3" app and applies the same
+fold as `accountlessValue(from:)`. `.libreByAbbott` is the newer US "Libre by
+Abbott" app. There is no default: the caller has to know which app activated the
+sensor. Both entry points lowercase the account ID, which is a no-op for the
+dashed UUID LibreView issues; `accountlessValue(from:)` and
+`init(accountlessUniqueID:)` still fold their argument byte for byte.
+
+An app that activates sensors itself needs neither fold — any stable 4-byte
+value works as its own receiver identity, and a LibreView account remains
+outside the protocol paths this package models.
+
 ## Data Quality
 
 Each `RealtimeGlucoseReading` carries the sensor's own quality channels (data
